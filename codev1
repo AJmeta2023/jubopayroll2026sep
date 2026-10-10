@@ -1,0 +1,1261 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>薪資明細生成與管理系統</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- SheetJS (xlsx) for Excel processing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- JSZip for batch image packaging -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <!-- jsPDF for direct PDF output -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;900&display=swap');
+    body {
+      font-family: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #f1f5f9;
+    }
+    @media print {
+      body * {
+        visibility: hidden;
+      }
+      #print-area, #print-area * {
+        visibility: visible;
+      }
+      #print-area {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      .page-break {
+        page-break-after: always;
+        break-after: page;
+      }
+      @page {
+        size: A4 portrait;
+        margin: 12mm;
+      }
+    }
+  </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen flex flex-col">
+
+  <!-- 頂部導航列 -->
+  <header class="bg-slate-900 text-white shadow-md sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-indigo-600 rounded-lg">
+          <i data-lucide="file-spreadsheet" class="w-6 h-6"></i>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold tracking-wide" id="nav-company-name">聚勃國際股份有限公司</h1>
+          <p class="text-xs text-slate-400" id="nav-period">薪資明細生成與管理系統</p>
+        </div>
+      </div>
+      <div class="flex items-center space-x-2">
+        <button onclick="downloadExcelTemplate()" class="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition">
+          <i data-lucide="download" class="w-4 h-4"></i>
+          <span>下載 Excel 範本</span>
+        </button>
+        <label class="cursor-pointer flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-sm transition">
+          <i data-lucide="upload" class="w-4 h-4"></i>
+          <span>匯入 EXCEL 檔</span>
+          <input type="file" id="excel-file-input" accept=".xlsx, .xls, .csv" class="hidden" onchange="handleExcelUpload(event)">
+        </label>
+        <button onclick="downloadAllPDF()" class="flex items-center space-x-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-sm transition">
+          <i data-lucide="file-down" class="w-4 h-4"></i>
+          <span>下載全體 PDF 檔</span>
+        </button>
+        <button onclick="downloadAllImagesZip()" class="flex items-center space-x-1.5 px-3.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg shadow-sm transition">
+          <i data-lucide="archive" class="w-4 h-4"></i>
+          <span>下載全體圖片 (ZIP)</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主工作區 -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full space-y-6">
+
+    <!-- 系統控制與配置面板 -->
+    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200/80">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">公司名稱</label>
+          <input type="text" id="config-company" value="聚勃國際股份有限公司" oninput="updateConfig()" class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">薪資月份標題</label>
+          <input type="text" id="config-title" value="2026年08月薪資明細" oninput="updateConfig()" class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">計薪期間</label>
+          <input type="text" id="config-period" value="2026/08/01 ~ 2026/08/31" oninput="updateConfig()" class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">底部備註提醒</label>
+          <input type="text" id="config-footer-note" value="※ 本明細表若有任何疑義，請於收到三日內向HR或總管理處洽詢確認。" oninput="updateConfig()" class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+        </div>
+      </div>
+    </div>
+
+    <!-- 功能頁籤切換 -->
+    <div class="flex items-center justify-between border-b border-slate-200">
+      <div class="flex space-x-6">
+        <button onclick="switchTab('table')" id="tab-btn-table" class="pb-3 text-sm font-bold border-b-2 border-indigo-600 text-indigo-600 flex items-center space-x-2">
+          <i data-lucide="layout-grid" class="w-4 h-4"></i>
+          <span>薪資總表編輯 (<span id="count-badge">0</span> 人)</span>
+        </button>
+        <button onclick="switchTab('cards')" id="tab-btn-cards" class="pb-3 text-sm font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-800 flex items-center space-x-2">
+          <i data-lucide="id-card" class="w-4 h-4"></i>
+          <span>獨立薪資單預覽與下載</span>
+        </button>
+      </div>
+      <div class="flex items-center space-x-2 pb-2" id="table-toolbar">
+        <button onclick="openAddModal()" class="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-lg transition">
+          <i data-lucide="user-plus" class="w-4 h-4"></i>
+          <span>手動新增員工</span>
+        </button>
+        <button onclick="clearAllData()" class="flex items-center space-x-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-lg transition">
+          <i data-lucide="trash-2" class="w-4 h-4"></i>
+          <span>清空所有資料</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 頁籤一：薪資總表編輯 -->
+    <div id="tab-content-table" class="space-y-4">
+      <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="overflow-x-auto max-h-[620px]">
+          <table class="w-full text-xs text-left border-collapse" id="main-salary-table">
+            <thead class="bg-slate-50 text-slate-700 uppercase tracking-wider sticky top-0 shadow-sm z-10 font-bold border-b border-slate-300">
+              <tr>
+                <th rowspan="2" class="px-3 py-2.5 border-r border-slate-200 text-center bg-slate-100 min-w-[90px]">員工編號</th>
+                <th rowspan="2" class="px-3 py-2.5 border-r border-slate-200 text-center bg-slate-100 min-w-[90px]">姓名</th>
+                <th colspan="7" class="px-3 py-1.5 border-r border-slate-300 text-center bg-sky-50 text-sky-900 border-b border-sky-200">應發金額 (A)</th>
+                <th colspan="6" class="px-3 py-1.5 border-r border-slate-300 text-center bg-rose-50 text-rose-900 border-b border-rose-200">應扣金額 (B)</th>
+                <th rowspan="2" class="px-3 py-2.5 border-r border-slate-200 text-center bg-emerald-50 text-emerald-950 min-w-[95px]">合計<br>(A)-(B)</th>
+                <th rowspan="2" class="px-3 py-2.5 border-r border-slate-200 text-center min-w-[130px]">備註</th>
+                <th rowspan="2" class="px-3 py-2.5 text-center min-w-[80px] bg-slate-100">操作</th>
+              </tr>
+              <tr class="bg-slate-50">
+                <th class="px-2 py-1.5 border-r border-slate-200 text-center min-w-[80px]">固定薪資</th>
+                <th class="px-2 py-1.5 border-r border-slate-200 text-center min-w-[70px]">伙食津</th>
+                <th class="px-2 py-1.5 border-r border-slate-200 text-center min-w-[65px]">加班</th>
+                <th class="px-2 py-1.5 border-r border-slate-200 text-center min-w-[65px]">獎金</th>
+                <th class="px-2 py-1.5 border-r border-slate-200 text-center min-w-[65px]">自提退</th>
+                <th class="px-2 py-1.5 border-r border-slate-200 text-center min-w-[75px]">其他加項</th>
+                <th class="px-2 py-1.5 border-r border-slate-300 text-center min-w-[80px] bg-sky-100/60 font-black text-sky-950">加項小計</th>
+                <th class="px-2 py-1.5 border-r border-slate-200 text-center min-w-[65px]">請假</th>
+                <th class="px-2 py-1.5 border-r border-slate-200 text-center min-w-[70px]">勞保費</th>
+                <th class="px-2 py-1.5 border-r border-slate-200 text-center min-w-[70px]">健保費</th>
+                <th class="px-2 py-1.5 border-r border-slate-200 text-center min-w-[65px]">自提退</th>
+                <th class="px-2 py-1.5 border-r border-slate-200 text-center min-w-[75px]">其他減項</th>
+                <th class="px-2 py-1.5 border-r border-slate-300 text-center min-w-[80px] bg-rose-100/60 font-black text-rose-950">減項小計</th>
+              </tr>
+            </thead>
+            <tbody id="table-body" class="divide-y divide-slate-200 bg-white">
+              <!-- 動態渲染資料 -->
+            </tbody>
+            <tfoot id="table-foot" class="bg-slate-100 font-bold border-t-2 border-slate-300 sticky bottom-0 text-slate-800">
+              <!-- 彙總總計 -->
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 頁籤二：獨立薪資單預覽與下載 -->
+    <div id="tab-content-cards" class="space-y-5 hidden">
+      <div class="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center space-x-3">
+          <label class="text-sm font-semibold text-slate-600">選擇員工預覽：</label>
+          <select id="preview-select" onchange="renderCurrentPreview()" class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+            <!-- 動態填入員工選項 -->
+          </select>
+          <div class="flex items-center space-x-1">
+            <button onclick="prevEmployee()" class="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+            <button onclick="nextEmployee()" class="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+          </div>
+        </div>
+
+        <div class="flex items-center space-x-2">
+          <button onclick="downloadCurrentPNG()" class="flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-sm transition">
+            <i data-lucide="image" class="w-4 h-4"></i>
+            <span>下載此張圖片 (PNG)</span>
+          </button>
+          <button onclick="downloadCurrentPDF()" class="flex items-center space-x-1.5 px-3.5 py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold rounded-lg shadow-sm transition">
+            <i data-lucide="file-down" class="w-4 h-4"></i>
+            <span>下載此張 PDF</span>
+          </button>
+          <button onclick="printCurrentEmployee()" class="flex items-center space-x-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded-lg shadow-sm transition">
+            <i data-lucide="printer" class="w-4 h-4"></i>
+            <span>僅列印此張薪資條</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Canvas 即時渲染顯示區域 -->
+      <div class="flex justify-center p-6 bg-slate-200/60 rounded-2xl border border-slate-300/80 overflow-x-auto">
+        <canvas id="preview-canvas" class="bg-white rounded-xl shadow-lg max-w-full h-auto"></canvas>
+      </div>
+    </div>
+  </main>
+
+  <!-- 系統專用隱藏畫布 (用於高解析度批次渲染) -->
+  <canvas id="export-canvas" style="display: none;"></canvas>
+
+  <!-- 列印專用區域 -->
+  <div id="print-area" class="hidden"></div>
+
+  <!-- 編輯/新增員工 Modal 視窗 -->
+  <div id="employee-modal" class="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center hidden backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full mx-4 overflow-hidden transform transition-all">
+      <div class="px-6 py-4 bg-slate-900 text-white flex justify-between items-center">
+        <h3 class="font-bold text-base" id="modal-title">新增員工薪資</h3>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <form id="employee-form" onsubmit="handleSaveEmployee(event)" class="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+        <input type="hidden" id="form-id">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">員工編號 *</label>
+            <input type="text" id="form-code" required class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">姓名 *</label>
+            <input type="text" id="form-name" required class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+          </div>
+        </div>
+
+        <!-- 應發項目 (A) -->
+        <div class="bg-sky-50/70 p-3.5 rounded-xl border border-sky-100">
+          <p class="text-xs font-bold text-sky-900 mb-2">應發項目 (A)</p>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="block text-[11px] text-slate-600 mb-0.5">固定薪資</label>
+              <input type="number" id="form-baseSalary" value="0" class="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded bg-white">
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-600 mb-0.5">伙食津</label>
+              <input type="number" id="form-mealAllowance" value="0" class="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded bg-white">
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-600 mb-0.5">加班</label>
+              <input type="number" id="form-overtime" value="0" class="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded bg-white">
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-600 mb-0.5">獎金</label>
+              <input type="number" id="form-bonus" value="0" class="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded bg-white">
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-600 mb-0.5">自提退</label>
+              <input type="number" id="form-pensionPlus" value="0" class="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded bg-white">
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-600 mb-0.5">其他加項</label>
+              <input type="number" id="form-otherPlus" value="0" class="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded bg-white">
+            </div>
+          </div>
+        </div>
+
+        <!-- 應扣項目 (B) -->
+        <div class="bg-rose-50/70 p-3.5 rounded-xl border border-rose-100">
+          <p class="text-xs font-bold text-rose-900 mb-2">應扣項目 (B)</p>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="block text-[11px] text-slate-600 mb-0.5">請假</label>
+              <input type="number" id="form-leaveDeduction" value="0" class="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded bg-white">
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-600 mb-0.5">勞保費</label>
+              <input type="number" id="form-laborInsurance" value="0" class="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded bg-white">
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-600 mb-0.5">健保費</label>
+              <input type="number" id="form-healthInsurance" value="0" class="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded bg-white">
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-600 mb-0.5">自提退</label>
+              <input type="number" id="form-pensionMinus" value="0" class="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded bg-white">
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-600 mb-0.5">其他減項</label>
+              <input type="number" id="form-otherMinus" value="0" class="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded bg-white">
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">備註說明</label>
+          <input type="text" id="form-note" placeholder="例如：補發7月伙食津貼 / 請假扣款明細" class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+        </div>
+
+        <div class="pt-2 flex justify-end space-x-2">
+          <button type="button" onclick="closeModal()" class="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition">取消</button>
+          <button type="submit" class="px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow transition">儲存資料</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Loading 指示遮罩 -->
+  <div id="loading-overlay" class="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center hidden backdrop-blur-sm text-white flex-col space-y-4">
+    <div class="animate-spin rounded-full h-12 w-12 border-4 border-white border-t-transparent"></div>
+    <p id="loading-text" class="text-sm font-semibold tracking-wider">正在處理中，請稍候...</p>
+  </div>
+
+  <script>
+    // 預設資料集 (初始化範例)
+    let salaryData = [
+      {
+        id: "emp-1",
+        code: "JBE26001",
+        name: "蕭宥萱",
+        baseSalary: 73000,
+        mealAllowance: 3000,
+        overtime: 0,
+        bonus: 0,
+        pensionPlus: 0,
+        otherPlus: 0,
+        leaveDeduction: 0,
+        laborInsurance: 1145,
+        healthInsurance: 1187,
+        pensionMinus: 0,
+        otherMinus: 0,
+        note: ""
+      },
+      {
+        id: "emp-2",
+        code: "JBE26038",
+        name: "陳建豪",
+        baseSalary: 42000,
+        mealAllowance: 3000,
+        overtime: 2450,
+        bonus: 5000,
+        pensionPlus: 0,
+        otherPlus: 500,
+        leaveDeduction: 0,
+        laborInsurance: 966,
+        healthInsurance: 720,
+        pensionMinus: 0,
+        otherMinus: 0,
+        note: "績效獎金+全勤"
+      },
+      {
+        id: "emp-3",
+        code: "JBE26042",
+        name: "林雅婷",
+        baseSalary: 38000,
+        mealAllowance: 3000,
+        overtime: 0,
+        bonus: 0,
+        pensionPlus: 0,
+        otherPlus: 0,
+        leaveDeduction: 1267,
+        laborInsurance: 874,
+        healthInsurance: 651,
+        pensionMinus: 2280,
+        otherMinus: 200,
+        note: "事假1天，自提6%"
+      }
+    ];
+
+    let currentSelectedId = salaryData[0]?.id || "";
+
+    // 格式化數字為千分位
+    function formatMoney(num) {
+      if (num === null || num === undefined || isNaN(num)) return "-";
+      if (Number(num) === 0) return "0";
+      return Number(num).toLocaleString('en-US');
+    }
+
+    // 計算加項小計
+    function calcGross(emp) {
+      return (Number(emp.baseSalary) || 0) +
+             (Number(emp.mealAllowance) || 0) +
+             (Number(emp.overtime) || 0) +
+             (Number(emp.bonus) || 0) +
+             (Number(emp.pensionPlus) || 0) +
+             (Number(emp.otherPlus) || 0);
+    }
+
+    // 計算減項小計 (包含其他減項)
+    function calcDeduction(emp) {
+      return (Number(emp.leaveDeduction) || 0) +
+             (Number(emp.laborInsurance) || 0) +
+             (Number(emp.healthInsurance) || 0) +
+             (Number(emp.pensionMinus) || 0) +
+             (Number(emp.otherMinus) || 0);
+    }
+
+    // 計算實發金額 (A)-(B)
+    function calcNet(emp) {
+      return calcGross(emp) - calcDeduction(emp);
+    }
+
+    // 初始化渲染
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      renderTable();
+      renderPreviewOptions();
+      renderCurrentPreview();
+    });
+
+    // 依據輸入設定即時更新抬頭
+    function updateConfig() {
+      const company = document.getElementById('config-company').value.trim() || '聚勃國際股份有限公司';
+      const period = document.getElementById('config-period').value.trim();
+      document.getElementById('nav-company-name').textContent = company;
+      document.getElementById('nav-period').textContent = period ? `計薪期間：${period}` : '薪資明細管理系統';
+      renderCurrentPreview();
+    }
+
+    // 渲染主編輯表格
+    function renderTable() {
+      const tbody = document.getElementById('table-body');
+      const tfoot = document.getElementById('table-foot');
+      tbody.innerHTML = '';
+      document.getElementById('count-badge').textContent = salaryData.length;
+
+      let totals = {
+        baseSalary: 0, mealAllowance: 0, overtime: 0, bonus: 0, pensionPlus: 0, otherPlus: 0, gross: 0,
+        leaveDeduction: 0, laborInsurance: 0, healthInsurance: 0, pensionMinus: 0, otherMinus: 0, deduction: 0, net: 0
+      };
+
+      salaryData.forEach((emp, index) => {
+        const gross = calcGross(emp);
+        const deduction = calcDeduction(emp);
+        const net = calcNet(emp);
+
+        totals.baseSalary += Number(emp.baseSalary) || 0;
+        totals.mealAllowance += Number(emp.mealAllowance) || 0;
+        totals.overtime += Number(emp.overtime) || 0;
+        totals.bonus += Number(emp.bonus) || 0;
+        totals.pensionPlus += Number(emp.pensionPlus) || 0;
+        totals.otherPlus += Number(emp.otherPlus) || 0;
+        totals.gross += gross;
+
+        totals.leaveDeduction += Number(emp.leaveDeduction) || 0;
+        totals.laborInsurance += Number(emp.laborInsurance) || 0;
+        totals.healthInsurance += Number(emp.healthInsurance) || 0;
+        totals.pensionMinus += Number(emp.pensionMinus) || 0;
+        totals.otherMinus += Number(emp.otherMinus) || 0;
+        totals.deduction += deduction;
+        totals.net += net;
+
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-50 transition border-b border-slate-100";
+        tr.innerHTML = `
+          <td class="px-2 py-2 text-center font-mono font-bold text-slate-700">${emp.code || '-'}</td>
+          <td class="px-2 py-2 text-center font-bold text-slate-900">${emp.name || '-'}</td>
+          <td class="px-1 py-1 text-right"><input type="number" value="${emp.baseSalary}" onchange="quickUpdate('${emp.id}', 'baseSalary', this.value)" class="w-full text-right p-1 rounded border border-transparent hover:border-slate-300 focus:border-indigo-500 text-xs"></td>
+          <td class="px-1 py-1 text-right"><input type="number" value="${emp.mealAllowance}" onchange="quickUpdate('${emp.id}', 'mealAllowance', this.value)" class="w-full text-right p-1 rounded border border-transparent hover:border-slate-300 focus:border-indigo-500 text-xs"></td>
+          <td class="px-1 py-1 text-right"><input type="number" value="${emp.overtime}" onchange="quickUpdate('${emp.id}', 'overtime', this.value)" class="w-full text-right p-1 rounded border border-transparent hover:border-slate-300 focus:border-indigo-500 text-xs"></td>
+          <td class="px-1 py-1 text-right"><input type="number" value="${emp.bonus}" onchange="quickUpdate('${emp.id}', 'bonus', this.value)" class="w-full text-right p-1 rounded border border-transparent hover:border-slate-300 focus:border-indigo-500 text-xs"></td>
+          <td class="px-1 py-1 text-right"><input type="number" value="${emp.pensionPlus}" onchange="quickUpdate('${emp.id}', 'pensionPlus', this.value)" class="w-full text-right p-1 rounded border border-transparent hover:border-slate-300 focus:border-indigo-500 text-xs"></td>
+          <td class="px-1 py-1 text-right"><input type="number" value="${emp.otherPlus}" onchange="quickUpdate('${emp.id}', 'otherPlus', this.value)" class="w-full text-right p-1 rounded border border-transparent hover:border-slate-300 focus:border-indigo-500 text-xs"></td>
+          <td class="px-2 py-2 text-right font-black text-sky-800 bg-sky-50/50">${formatMoney(gross)}</td>
+          <td class="px-1 py-1 text-right"><input type="number" value="${emp.leaveDeduction}" onchange="quickUpdate('${emp.id}', 'leaveDeduction', this.value)" class="w-full text-right p-1 rounded border border-transparent hover:border-slate-300 focus:border-indigo-500 text-xs"></td>
+          <td class="px-1 py-1 text-right"><input type="number" value="${emp.laborInsurance}" onchange="quickUpdate('${emp.id}', 'laborInsurance', this.value)" class="w-full text-right p-1 rounded border border-transparent hover:border-slate-300 focus:border-indigo-500 text-xs"></td>
+          <td class="px-1 py-1 text-right"><input type="number" value="${emp.healthInsurance}" onchange="quickUpdate('${emp.id}', 'healthInsurance', this.value)" class="w-full text-right p-1 rounded border border-transparent hover:border-slate-300 focus:border-indigo-500 text-xs"></td>
+          <td class="px-1 py-1 text-right"><input type="number" value="${emp.pensionMinus}" onchange="quickUpdate('${emp.id}', 'pensionMinus', this.value)" class="w-full text-right p-1 rounded border border-transparent hover:border-slate-300 focus:border-indigo-500 text-xs"></td>
+          <td class="px-1 py-1 text-right"><input type="number" value="${emp.otherMinus}" onchange="quickUpdate('${emp.id}', 'otherMinus', this.value)" class="w-full text-right p-1 rounded border border-transparent hover:border-slate-300 focus:border-indigo-500 text-xs"></td>
+          <td class="px-2 py-2 text-right font-black text-rose-800 bg-rose-50/50">${formatMoney(deduction)}</td>
+          <td class="px-2 py-2 text-right font-black text-emerald-700 bg-emerald-50/70 text-sm">${formatMoney(net)}</td>
+          <td class="px-1 py-1"><input type="text" value="${emp.note || ''}" onchange="quickUpdate('${emp.id}', 'note', this.value)" placeholder="備註" class="w-full p-1 rounded border border-transparent hover:border-slate-300 focus:border-indigo-500 text-xs"></td>
+          <td class="px-2 py-2 text-center">
+            <div class="flex items-center justify-center space-x-1">
+              <button onclick="editEmployee('${emp.id}')" title="完整編輯" class="p-1 text-slate-500 hover:text-indigo-600 rounded"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
+              <button onclick="deleteEmployee('${emp.id}')" title="刪除" class="p-1 text-slate-400 hover:text-rose-600 rounded"><i data-lucide="trash" class="w-4 h-4"></i></button>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // 總計列
+      tfoot.innerHTML = `
+        <tr class="divide-x divide-slate-200">
+          <td colspan="2" class="px-3 py-2.5 text-center font-bold">全公司合計 (${salaryData.length} 人)</td>
+          <td class="px-2 py-2.5 text-right font-bold">${formatMoney(totals.baseSalary)}</td>
+          <td class="px-2 py-2.5 text-right font-bold">${formatMoney(totals.mealAllowance)}</td>
+          <td class="px-2 py-2.5 text-right font-bold">${formatMoney(totals.overtime)}</td>
+          <td class="px-2 py-2.5 text-right font-bold">${formatMoney(totals.bonus)}</td>
+          <td class="px-2 py-2.5 text-right font-bold">${formatMoney(totals.pensionPlus)}</td>
+          <td class="px-2 py-2.5 text-right font-bold">${formatMoney(totals.otherPlus)}</td>
+          <td class="px-2 py-2.5 text-right font-black text-sky-900 bg-sky-100">${formatMoney(totals.gross)}</td>
+          <td class="px-2 py-2.5 text-right font-bold">${formatMoney(totals.leaveDeduction)}</td>
+          <td class="px-2 py-2.5 text-right font-bold">${formatMoney(totals.laborInsurance)}</td>
+          <td class="px-2 py-2.5 text-right font-bold">${formatMoney(totals.healthInsurance)}</td>
+          <td class="px-2 py-2.5 text-right font-bold">${formatMoney(totals.pensionMinus)}</td>
+          <td class="px-2 py-2.5 text-right font-bold">${formatMoney(totals.otherMinus)}</td>
+          <td class="px-2 py-2.5 text-right font-black text-rose-900 bg-rose-100">${formatMoney(totals.deduction)}</td>
+          <td class="px-2 py-2.5 text-right font-black text-emerald-900 bg-emerald-100 text-sm">${formatMoney(totals.net)}</td>
+          <td colspan="2" class="px-3 py-2.5 text-center text-slate-400 font-normal">系統即時運算</td>
+        </tr>
+      `;
+      lucide.createIcons();
+    }
+
+    function quickUpdate(id, field, value) {
+      const emp = salaryData.find(x => x.id === id);
+      if (emp) {
+        emp[field] = field === 'note' ? value : (Number(value) || 0);
+        renderTable();
+        renderPreviewOptions();
+        renderCurrentPreview();
+      }
+    }
+
+    // 頁籤切換
+    function switchTab(tab) {
+      const btnTable = document.getElementById('tab-btn-table');
+      const btnCards = document.getElementById('tab-btn-cards');
+      const contentTable = document.getElementById('tab-content-table');
+      const contentCards = document.getElementById('tab-content-cards');
+      const tableToolbar = document.getElementById('table-toolbar');
+
+      if (tab === 'table') {
+        btnTable.className = "pb-3 text-sm font-bold border-b-2 border-indigo-600 text-indigo-600 flex items-center space-x-2";
+        btnCards.className = "pb-3 text-sm font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-800 flex items-center space-x-2";
+        contentTable.classList.remove('hidden');
+        contentCards.classList.add('hidden');
+        tableToolbar.classList.remove('hidden');
+      } else {
+        btnCards.className = "pb-3 text-sm font-bold border-b-2 border-indigo-600 text-indigo-600 flex items-center space-x-2";
+        btnTable.className = "pb-3 text-sm font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-800 flex items-center space-x-2";
+        contentCards.classList.remove('hidden');
+        contentTable.classList.add('hidden');
+        tableToolbar.classList.add('hidden');
+        renderCurrentPreview();
+      }
+    }
+
+    // 預覽下拉選單
+    function renderPreviewOptions() {
+      const select = document.getElementById('preview-select');
+      select.innerHTML = '';
+      salaryData.forEach((emp, index) => {
+        const option = document.createElement('option');
+        option.value = emp.id;
+        option.textContent = `${emp.code} - ${emp.name}`;
+        if (emp.id === currentSelectedId) option.selected = true;
+        select.appendChild(option);
+      });
+      if (salaryData.length > 0 && !salaryData.some(e => e.id === currentSelectedId)) {
+        currentSelectedId = salaryData[0].id;
+      }
+    }
+
+    function prevEmployee() {
+      const index = salaryData.findIndex(e => e.id === currentSelectedId);
+      if (index > 0) {
+        currentSelectedId = salaryData[index - 1].id;
+        document.getElementById('preview-select').value = currentSelectedId;
+        renderCurrentPreview();
+      }
+    }
+
+    function nextEmployee() {
+      const index = salaryData.findIndex(e => e.id === currentSelectedId);
+      if (index < salaryData.length - 1) {
+        currentSelectedId = salaryData[index + 1].id;
+        document.getElementById('preview-select').value = currentSelectedId;
+        renderCurrentPreview();
+      }
+    }
+
+    /* ==========================================================================
+       核心功能：原生 2D CANVAS 繪製引擎
+       保證 100% 不漏格線、不掉字、跨平台高清晰輸出
+       ========================================================================== */
+    function drawPayslipToCanvas(canvas, emp) {
+      const ctx = canvas.getContext('2d');
+      const dpr = 2; // 2x 超高畫質抗鋸齒
+      const W = 1100;
+      const H = 470;
+
+      canvas.width = W * dpr;
+      canvas.height = H * dpr;
+      canvas.style.width = W + 'px';
+      canvas.style.height = H + 'px';
+
+      ctx.save();
+      ctx.scale(dpr, dpr);
+
+      // 1. 底色與外圍卡片圓角
+      ctx.fillStyle = '#ffffff';
+      roundRect(ctx, 0, 0, W, H, 16, true, false);
+
+      // 外邊框
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, 1, 1, W - 2, H - 2, 16, false, true);
+
+      // 2. 頂部抬頭區
+      const company = document.getElementById('config-company').value.trim() || '聚勃國際股份有限公司';
+      const title = document.getElementById('config-title').value.trim() || '薪資明細';
+      const period = document.getElementById('config-period').value.trim() || '';
+
+      // 公司抬頭
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 28px "Noto Sans TC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(company, W / 2, 28);
+
+      // 月份薪資明細
+      ctx.fillStyle = '#334155';
+      ctx.font = 'bold 20px "Noto Sans TC", sans-serif';
+      ctx.fillText(title, W / 2, 70);
+
+      // 資訊條 (員工編號、姓名、計薪期間)
+      const metaY = 112;
+      ctx.textBaseline = 'middle';
+
+      // 員工編號
+      ctx.textAlign = 'left';
+      ctx.font = 'normal 15px "Noto Sans TC", sans-serif';
+      ctx.fillStyle = '#475569';
+      ctx.fillText('員工編號：', 40, metaY);
+      ctx.font = 'bold 16px "Noto Sans TC", monospace';
+      ctx.fillStyle = '#0f172a';
+      ctx.fillText(emp.code || '-', 115, metaY);
+
+      // 姓名
+      ctx.textAlign = 'left';
+      ctx.font = 'normal 15px "Noto Sans TC", sans-serif';
+      ctx.fillStyle = '#475569';
+      ctx.fillText('姓名：', 420, metaY);
+      ctx.font = 'bold 18px "Noto Sans TC", sans-serif';
+      ctx.fillStyle = '#0f172a';
+      ctx.fillText(emp.name || '-', 465, metaY);
+
+      // 計薪期間
+      if (period) {
+        ctx.textAlign = 'right';
+        ctx.font = 'normal 14px "Noto Sans TC", sans-serif';
+        ctx.fillStyle = '#475569';
+        ctx.fillText(`計薪期間：${period}`, W - 40, metaY);
+      }
+
+      // 分隔線
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(40, 134);
+      ctx.lineTo(W - 40, 134);
+      ctx.stroke();
+
+      /* 3. 薪資表格向量繪製
+         總共 15 個細項直欄：
+         0~6: 應發 (固定薪資, 伙食津, 加班, 獎金, 自提退, 其他加項, 加項小計) -> 7欄
+         7~12: 應扣 (請假, 勞保費, 健保費, 自提退, 其他減項, 減項小計) -> 6欄
+         13: 合計 (A)-(B)
+         14: 備註
+      */
+      const tableX = 40;
+      const tableY = 155;
+      const tableW = W - 80; // 1020px
+      const row1H = 38; // 第一層表頭高度
+      const row2H = 46; // 第二層表頭高度
+      const dataRowH = 50; // 數值列高度
+      const totalTableH = row1H + row2H + dataRowH; // 134px
+
+      // 欄寬精確分配 (合計 1020px)
+      const colWidths = [
+        68, 62, 54, 54, 54, 68, 76,   // 應發 7 欄 (共 436px)
+        54, 62, 62, 54, 68, 76,       // 應扣 6 欄 (共 376px)
+        110,                          // 合計 (A)-(B) (110px)
+        98                            // 備註 (98px)
+      ];
+
+      // 計算每個縱欄的 X 起點
+      const colX = [tableX];
+      for (let i = 0; i < colWidths.length; i++) {
+        colX.push(colX[i] + colWidths[i]);
+      }
+
+      // (A) 區塊背景色彩填色
+      // 應發項目背景
+      ctx.fillStyle = '#f0f9ff'; // sky-50
+      ctx.fillRect(colX[0], tableY, colX[7] - colX[0], totalTableH);
+      ctx.fillStyle = '#e0f2fe'; // sky-100 加項小計直欄加深
+      ctx.fillRect(colX[6], tableY + row1H, colWidths[6], row2H + dataRowH);
+
+      // 應扣項目背景
+      ctx.fillStyle = '#fff1f2'; // rose-50
+      ctx.fillRect(colX[7], tableY, colX[13] - colX[7], totalTableH);
+      ctx.fillStyle = '#ffe4e6'; // rose-100 減項小計直欄加深
+      ctx.fillRect(colX[12], tableY + row1H, colWidths[12], row2H + dataRowH);
+
+      // 合計背景
+      ctx.fillStyle = '#ecfdf5'; // emerald-50
+      ctx.fillRect(colX[13], tableY, colWidths[13], totalTableH);
+
+      // 備註背景
+      ctx.fillStyle = '#f8fafc'; // slate-50
+      ctx.fillRect(colX[14], tableY, colWidths[14], totalTableH);
+
+      // (B) 繪製所有儲存格格線 (精準 1px 向量繪製，不缺線)
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 1;
+
+      // 橫線
+      ctx.beginPath();
+      ctx.moveTo(tableX, tableY);
+      ctx.lineTo(tableX + tableW, tableY);
+
+      ctx.moveTo(tableX, tableY + row1H);
+      ctx.lineTo(colX[13], tableY + row1H); // 第 1 層底線 (止於合計前)
+
+      ctx.moveTo(tableX, tableY + row1H + row2H);
+      ctx.lineTo(tableX + tableW, tableY + row1H + row2H); // 第 2 層底線
+
+      ctx.moveTo(tableX, tableY + totalTableH);
+      ctx.lineTo(tableX + tableW, tableY + totalTableH); // 表格底線
+      ctx.stroke();
+
+      // 直線
+      for (let i = 0; i <= colWidths.length; i++) {
+        const x = colX[i];
+        ctx.beginPath();
+        if (i === 0 || i === colWidths.length || i === 7 || i === 13 || i === 14) {
+          // 貫穿全表格的大隔線 (外框、應發/應扣分界、合計分界、備註分界)
+          ctx.moveTo(x, tableY);
+          ctx.lineTo(x, tableY + totalTableH);
+        } else {
+          // 僅在第二層及資料列顯示的細分線
+          ctx.moveTo(x, tableY + row1H);
+          ctx.lineTo(x, tableY + totalTableH);
+        }
+        ctx.stroke();
+      }
+
+      // 表格加強外框
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(tableX, tableY, tableW, totalTableH);
+
+      // (C) 繪製文字與數值
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // 第一層大標題
+      ctx.font = 'bold 15px "Noto Sans TC", sans-serif';
+      ctx.fillStyle = '#0369a1';
+      ctx.fillText('應發金額 (A)', (colX[0] + colX[7]) / 2, tableY + row1H / 2);
+
+      ctx.fillStyle = '#be123c';
+      ctx.fillText('應扣金額 (B)', (colX[7] + colX[13]) / 2, tableY + row1H / 2);
+
+      // 合計大標題
+      ctx.fillStyle = '#065f46';
+      ctx.font = 'bold 15px "Noto Sans TC", sans-serif';
+      ctx.fillText('合計', colX[13] + colWidths[13] / 2, tableY + row1H / 2);
+
+      // 備註大標題 (垂直完全居中)
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 15px "Noto Sans TC", sans-serif';
+      ctx.fillText('備註', colX[14] + colWidths[14] / 2, tableY + (row1H + row2H) / 2);
+
+      // 第二層欄位細項文字
+      const subHeaderTitles = [
+        '固定薪資', '伙食津', '加班', '獎金', '自提退', '其他加項', '加項小計',
+        '請假', '勞保費', '健保費', '自提退', '其他減項', '減項小計',
+        '(A)-(B)'
+      ];
+
+      for (let i = 0; i < subHeaderTitles.length; i++) {
+        const cx = colX[i] + colWidths[i] / 2;
+        const cy = tableY + row1H + row2H / 2;
+        if (i === 6) {
+          ctx.fillStyle = '#0c4a6e';
+          ctx.font = 'bold 12px "Noto Sans TC", sans-serif';
+        } else if (i === 12) {
+          ctx.fillStyle = '#881337';
+          ctx.font = 'bold 12px "Noto Sans TC", sans-serif';
+        } else if (i === 13) {
+          ctx.fillStyle = '#065f46';
+          ctx.font = 'bold 13px "Noto Sans TC", sans-serif';
+        } else {
+          ctx.fillStyle = '#334155';
+          ctx.font = 'normal 12px "Noto Sans TC", sans-serif';
+        }
+        ctx.fillText(subHeaderTitles[i], cx, cy);
+      }
+
+      // 第三層：數據填入
+      const gross = calcGross(emp);
+      const deduction = calcDeduction(emp);
+      const net = calcNet(emp);
+
+      const rowValues = [
+        formatMoney(emp.baseSalary),
+        formatMoney(emp.mealAllowance),
+        formatMoney(emp.overtime),
+        formatMoney(emp.bonus),
+        formatMoney(emp.pensionPlus),
+        formatMoney(emp.otherPlus),
+        formatMoney(gross),
+        formatMoney(emp.leaveDeduction),
+        formatMoney(emp.laborInsurance),
+        formatMoney(emp.healthInsurance),
+        formatMoney(emp.pensionMinus),
+        formatMoney(emp.otherMinus),
+        formatMoney(deduction),
+        formatMoney(net)
+      ];
+
+      const dataY = tableY + row1H + row2H + dataRowH / 2;
+
+      for (let i = 0; i < rowValues.length; i++) {
+        const cx = colX[i] + colWidths[i] / 2;
+        if (i === 6) {
+          ctx.fillStyle = '#0369a1';
+          ctx.font = 'bold 15px "Noto Sans TC", monospace';
+        } else if (i === 12) {
+          ctx.fillStyle = '#be123c';
+          ctx.font = 'bold 15px "Noto Sans TC", monospace';
+        } else if (i === 13) {
+          ctx.fillStyle = '#047857';
+          ctx.font = 'bold 18px "Noto Sans TC", monospace';
+        } else {
+          ctx.fillStyle = '#0f172a';
+          ctx.font = 'normal 13px "Noto Sans TC", monospace';
+        }
+        ctx.fillText(rowValues[i], cx, dataY);
+      }
+
+      // 填寫備註文字 (自動限寬與截斷保護)
+      ctx.textAlign = 'center';
+      ctx.font = 'normal 12px "Noto Sans TC", sans-serif';
+      ctx.fillStyle = '#334155';
+      const noteText = (emp.note || '-').toString();
+      const maxNoteW = colWidths[14] - 8;
+      let displayNote = noteText;
+      if (ctx.measureText(displayNote).width > maxNoteW) {
+        while (ctx.measureText(displayNote + '...').width > maxNoteW && displayNote.length > 0) {
+          displayNote = displayNote.substring(0, displayNote.length - 1);
+        }
+        displayNote += '...';
+      }
+      ctx.fillText(displayNote, colX[14] + colWidths[14] / 2, dataY);
+
+      // 4. 底部備註提醒文字
+      const footerNote = document.getElementById('config-footer-note').value.trim();
+      if (footerNote) {
+        ctx.textAlign = 'left';
+        ctx.font = 'normal 12px "Noto Sans TC", sans-serif';
+        ctx.fillStyle = '#64748b';
+        ctx.fillText(footerNote, 40, tableY + totalTableH + 35);
+      }
+
+      ctx.restore();
+    }
+
+    // 圓角矩形輔助函數
+    function roundRect(ctx, x, y, width, height, radius, fill, stroke) {
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + width - radius, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+      ctx.lineTo(x + width, y + height - radius);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+      ctx.lineTo(x + radius, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+      if (fill) ctx.fill();
+      if (stroke) ctx.stroke();
+    }
+
+    // 渲染預覽畫布
+    function renderCurrentPreview() {
+      const emp = salaryData.find(e => e.id === currentSelectedId);
+      if (!emp) return;
+      const canvas = document.getElementById('preview-canvas');
+      drawPayslipToCanvas(canvas, emp);
+    }
+
+    /* ==========================================================================
+       下載功能：單張 PNG、全體 ZIP、單張/全體 PDF
+       ========================================================================== */
+    // 下載單張 PNG
+    function downloadCurrentPNG() {
+      const emp = salaryData.find(e => e.id === currentSelectedId);
+      if (!emp) return;
+      const canvas = document.getElementById('preview-canvas');
+      const dataUrl = canvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      const company = document.getElementById('config-company').value.trim() || '公司';
+      const title = document.getElementById('config-title').value.trim() || '薪資明細';
+      link.download = `${company}_${emp.code}_${emp.name}_${title}.png`;
+      link.href = dataUrl;
+      link.click();
+    }
+
+    // 下載單張 PDF
+    function downloadCurrentPDF() {
+      const emp = salaryData.find(e => e.id === currentSelectedId);
+      if (!emp) return;
+      showLoading("正在生成 PDF 檔案...");
+
+      setTimeout(() => {
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+        const canvas = document.getElementById('preview-canvas');
+        const imgData = canvas.toDataURL('image/png');
+
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
+        const imgWidth = 260; // 留邊距
+        const imgHeight = (canvas.height / canvas.width) * imgWidth;
+        const x = (pdfWidth - imgWidth) / 2;
+        const y = (pdfHeight - imgHeight) / 2;
+
+        pdf.addImage(imgData, 'PNG', x, y, imgWidth, imgHeight);
+        const company = document.getElementById('config-company').value.trim() || '公司';
+        const title = document.getElementById('config-title').value.trim() || '薪資明細';
+        pdf.save(`${company}_${emp.code}_${emp.name}_${title}.pdf`);
+        hideLoading();
+      }, 100);
+    }
+
+    // 打包全體員工圖片 (ZIP)
+    async function downloadAllImagesZip() {
+      if (salaryData.length === 0) {
+        alert("目前沒有薪資資料可下載！");
+        return;
+      }
+      showLoading("正在批次產出全體薪資圖片並打包 ZIP...");
+
+      setTimeout(async () => {
+        try {
+          const zip = new JSZip();
+          const exportCanvas = document.getElementById('export-canvas');
+          const company = document.getElementById('config-company').value.trim() || '公司';
+          const title = document.getElementById('config-title').value.trim() || '薪資明細';
+
+          for (let i = 0; i < salaryData.length; i++) {
+            const emp = salaryData[i];
+            drawPayslipToCanvas(exportCanvas, emp);
+            const dataUrl = exportCanvas.toDataURL('image/png');
+            const base64Data = dataUrl.replace(/^data:image\/png;base64,/, "");
+            const fileName = `${String(i + 1).padStart(2, '0')}_${emp.code}_${emp.name}_薪資單.png`;
+            zip.file(fileName, base64Data, { base64: true });
+          }
+
+          const content = await zip.generateAsync({ type: "blob" });
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(content);
+          link.download = `${company}_${title}_全體員工薪資圖檔.zip`;
+          link.click();
+          hideLoading();
+        } catch (e) {
+          console.error(e);
+          hideLoading();
+          alert("打包圖片時發生錯誤，請重試！");
+        }
+      }, 100);
+    }
+
+    // 下載全體合併 PDF 檔
+    function downloadAllPDF() {
+      if (salaryData.length === 0) {
+        alert("目前沒有薪資資料可下載！");
+        return;
+      }
+      showLoading("正在生成全體員工合併 PDF 檔案...");
+
+      setTimeout(() => {
+        try {
+          const { jsPDF } = window.jspdf;
+          const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+          const exportCanvas = document.getElementById('export-canvas');
+          const pdfWidth = pdf.internal.pageSize.getWidth();
+          const pdfHeight = pdf.internal.pageSize.getHeight();
+          const imgWidth = 260;
+
+          salaryData.forEach((emp, index) => {
+            if (index > 0) pdf.addPage('a4', 'landscape');
+            drawPayslipToCanvas(exportCanvas, emp);
+            const imgData = exportCanvas.toDataURL('image/png');
+            const imgHeight = (exportCanvas.height / exportCanvas.width) * imgWidth;
+            const x = (pdfWidth - imgWidth) / 2;
+            const y = (pdfHeight - imgHeight) / 2;
+            pdf.addImage(imgData, 'PNG', x, y, imgWidth, imgHeight);
+          });
+
+          const company = document.getElementById('config-company').value.trim() || '公司';
+          const title = document.getElementById('config-title').value.trim() || '薪資明細';
+          pdf.save(`${company}_${title}_全體薪資單.pdf`);
+          hideLoading();
+        } catch (e) {
+          console.error(e);
+          hideLoading();
+          alert("生成 PDF 發生錯誤，請重試！");
+        }
+      }, 100);
+    }
+
+    // 列印功能
+    function printCurrentEmployee() {
+      const emp = salaryData.find(e => e.id === currentSelectedId);
+      if (!emp) return;
+      const canvas = document.getElementById('preview-canvas');
+      const imgData = canvas.toDataURL('image/png');
+
+      const printArea = document.getElementById('print-area');
+      printArea.innerHTML = `
+        <div style="display:flex; justify-content:center; align-items:center; height:100vh;">
+          <img src="${imgData}" style="width:100%; max-width:1050px;">
+        </div>
+      `;
+      window.print();
+    }
+
+    /* ==========================================================================
+       EXCEL 範本下載與檔案匯入處理
+       ========================================================================== */
+    function downloadExcelTemplate() {
+      const headers = [
+        ["聚勃國際股份有限公司 薪資匯入範本 (請勿變更欄位標題順序)"],
+        [
+          "員工編號", "姓名",
+          "固定薪資", "伙食津", "加班", "獎金", "自提退(加)", "其他加項",
+          "請假", "勞保費", "健保費", "自提退(扣)", "其他減項", "備註"
+        ],
+        [
+          "JBE26001", "蕭宥萱", 73000, 3000, 0, 0, 0, 0, 0, 1145, 1187, 0, 0, ""
+        ],
+        [
+          "JBE26038", "陳建豪", 42000, 3000, 2450, 5000, 0, 500, 0, 966, 720, 0, 0, "全勤"
+        ]
+      ];
+
+      const ws = XLSX.utils.aoa_to_sheet(headers);
+      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 13 } }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "薪資匯入範本");
+      XLSX.writeFile(wb, "聚勃國際_薪資明細標準範本.xlsx");
+    }
+
+    function handleExcelUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        try {
+          const data = new Uint8Array(evt.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+
+          if (rows.length < 2) {
+            alert("Excel 檔案內容不足或空白！");
+            return;
+          }
+
+          // 尋找標題列
+          let headerIdx = -1;
+          for (let r = 0; r < Math.min(rows.length, 6); r++) {
+            const rowStr = (rows[r] || []).join(' ');
+            if (rowStr.includes("姓名") || rowStr.includes("固定薪資") || rowStr.includes("員工編號")) {
+              headerIdx = r;
+              break;
+            }
+          }
+
+          if (headerIdx === -1) {
+            alert("找不到相符的薪資表頭，請下載並參照標準範本！");
+            return;
+          }
+
+          const headers = rows[headerIdx].map(h => (h || '').toString().trim());
+          const newEmps = [];
+
+          for (let r = headerIdx + 1; r < rows.length; r++) {
+            const row = rows[r];
+            if (!row || row.length === 0 || (!row[0] && !row[1])) continue;
+
+            const getCol = (keywords) => {
+              for (let i = 0; i < headers.length; i++) {
+                if (keywords.some(k => headers[i].includes(k))) {
+                  return row[i];
+                }
+              }
+              return 0;
+            };
+
+            const code = (getCol(["員工編號", "工號", "編號"]) || "").toString().trim();
+            const name = (getCol(["姓名", "員工姓名"]) || "").toString().trim();
+            if (!code && !name) continue;
+
+            newEmps.push({
+              id: "emp-" + Date.now() + "-" + Math.random().toString(36).substr(2, 5),
+              code: code || `EMP${String(r).padStart(3, '0')}`,
+              name: name || "未命名",
+              baseSalary: Number(getCol(["固定薪資", "底薪", "本薪"])) || 0,
+              mealAllowance: Number(getCol(["伙食津", "伙食費", "伙食津貼"])) || 0,
+              overtime: Number(getCol(["加班", "加班費"])) || 0,
+              bonus: Number(getCol(["獎金", "績效獎金"])) || 0,
+              pensionPlus: Number(getCol(["自提退(加)", "自提(加)", "退(加)"])) || 0,
+              otherPlus: Number(getCol(["其他加項", "其他加"])) || 0,
+              leaveDeduction: Number(getCol(["請假", "請假扣款", "事病假"])) || 0,
+              laborInsurance: Number(getCol(["勞保費", "勞保"])) || 0,
+              healthInsurance: Number(getCol(["健保費", "健保"])) || 0,
+              pensionMinus: Number(getCol(["自提退(扣)", "自提(扣)", "勞退自提", "自提退"])) || 0,
+              otherMinus: Number(getCol(["其他減項", "其他扣", "其他減"])) || 0,
+              note: (getCol(["備註", "說明"]) || "").toString().trim()
+            });
+          }
+
+          if (newEmps.length > 0) {
+            salaryData = newEmps;
+            currentSelectedId = salaryData[0].id;
+            renderTable();
+            renderPreviewOptions();
+            renderCurrentPreview();
+            alert(`成功匯入 ${newEmps.length} 筆員工薪資資料！`);
+          } else {
+            alert("未讀取到有效的員工資料，請確認檔案格式！");
+          }
+        } catch (err) {
+          console.error(err);
+          alert("解析 Excel 檔案發生錯誤：" + err.message);
+        }
+        e.target.value = '';
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    /* ==========================================================================
+       MODAL 增刪改查操作
+       ========================================================================== */
+    function openAddModal() {
+      document.getElementById('modal-title').textContent = "新增員工薪資";
+      document.getElementById('form-id').value = "";
+      document.getElementById('form-code').value = "JBE" + Math.floor(10000 + Math.random() * 90000);
+      document.getElementById('form-name').value = "";
+      document.getElementById('form-baseSalary').value = "0";
+      document.getElementById('form-mealAllowance').value = "3000";
+      document.getElementById('form-overtime').value = "0";
+      document.getElementById('form-bonus').value = "0";
+      document.getElementById('form-pensionPlus').value = "0";
+      document.getElementById('form-otherPlus').value = "0";
+      document.getElementById('form-leaveDeduction').value = "0";
+      document.getElementById('form-laborInsurance').value = "0";
+      document.getElementById('form-healthInsurance').value = "0";
+      document.getElementById('form-pensionMinus').value = "0";
+      document.getElementById('form-otherMinus').value = "0";
+      document.getElementById('form-note').value = "";
+      document.getElementById('employee-modal').classList.remove('hidden');
+    }
+
+    function editEmployee(id) {
+      const emp = salaryData.find(e => e.id === id);
+      if (!emp) return;
+      document.getElementById('modal-title').textContent = "編輯員工薪資資料";
+      document.getElementById('form-id').value = emp.id;
+      document.getElementById('form-code').value = emp.code;
+      document.getElementById('form-name').value = emp.name;
+      document.getElementById('form-baseSalary').value = emp.baseSalary;
+      document.getElementById('form-mealAllowance').value = emp.mealAllowance;
+      document.getElementById('form-overtime').value = emp.overtime;
+      document.getElementById('form-bonus').value = emp.bonus;
+      document.getElementById('form-pensionPlus').value = emp.pensionPlus;
+      document.getElementById('form-otherPlus').value = emp.otherPlus;
+      document.getElementById('form-leaveDeduction').value = emp.leaveDeduction;
+      document.getElementById('form-laborInsurance').value = emp.laborInsurance;
+      document.getElementById('form-healthInsurance').value = emp.healthInsurance;
+      document.getElementById('form-pensionMinus').value = emp.pensionMinus;
+      document.getElementById('form-otherMinus').value = emp.otherMinus;
+      document.getElementById('form-note').value = emp.note || "";
+      document.getElementById('employee-modal').classList.remove('hidden');
+    }
+
+    function closeModal() {
+      document.getElementById('employee-modal').classList.add('hidden');
+    }
+
+    function handleSaveEmployee(e) {
+      e.preventDefault();
+      const id = document.getElementById('form-id').value;
+      const empData = {
+        code: document.getElementById('form-code').value.trim(),
+        name: document.getElementById('form-name').value.trim(),
+        baseSalary: Number(document.getElementById('form-baseSalary').value) || 0,
+        mealAllowance: Number(document.getElementById('form-mealAllowance').value) || 0,
+        overtime: Number(document.getElementById('form-overtime').value) || 0,
+        bonus: Number(document.getElementById('form-bonus').value) || 0,
+        pensionPlus: Number(document.getElementById('form-pensionPlus').value) || 0,
+        otherPlus: Number(document.getElementById('form-otherPlus').value) || 0,
+        leaveDeduction: Number(document.getElementById('form-leaveDeduction').value) || 0,
+        laborInsurance: Number(document.getElementById('form-laborInsurance').value) || 0,
+        healthInsurance: Number(document.getElementById('form-healthInsurance').value) || 0,
+        pensionMinus: Number(document.getElementById('form-pensionMinus').value) || 0,
+        otherMinus: Number(document.getElementById('form-otherMinus').value) || 0,
+        note: document.getElementById('form-note').value.trim()
+      };
+
+      if (id) {
+        const index = salaryData.findIndex(x => x.id === id);
+        if (index !== -1) {
+          salaryData[index] = { ...salaryData[index], ...empData };
+        }
+      } else {
+        const newId = "emp-" + Date.now();
+        salaryData.push({ id: newId, ...empData });
+        currentSelectedId = newId;
+      }
+
+      closeModal();
+      renderTable();
+      renderPreviewOptions();
+      renderCurrentPreview();
+    }
+
+    function deleteEmployee(id) {
+      if (!confirm("確定要刪除這筆員工薪資資料嗎？")) return;
+      salaryData = salaryData.filter(x => x.id !== id);
+      if (currentSelectedId === id) {
+        currentSelectedId = salaryData[0]?.id || "";
+      }
+      renderTable();
+      renderPreviewOptions();
+      renderCurrentPreview();
+    }
+
+    function clearAllData() {
+      if (!confirm("警告：這將清空所有目前輸入與匯入的資料，確定執行？")) return;
+      salaryData = [];
+      currentSelectedId = "";
+      renderTable();
+      renderPreviewOptions();
+      renderCurrentPreview();
+    }
+
+    function showLoading(text) {
+      document.getElementById('loading-text').textContent = text;
+      document.getElementById('loading-overlay').classList.remove('hidden');
+    }
+
+    function hideLoading() {
+      document.getElementById('loading-overlay').classList.add('hidden');
+    }
+  </script>
+</body>
+</html>
